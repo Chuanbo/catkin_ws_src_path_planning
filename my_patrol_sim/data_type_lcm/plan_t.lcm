@@ -1,0 +1,9 @@
+package exlcm;
+
+struct plan_t
+{
+	int32_t  robot_id;
+	int32_t  robot_num;
+	int32_t  num_step;
+	int32_t  steps[num_step];
+}

@@ -1,0 +1,12 @@
+package exlcm;
+
+struct status_t
+{
+	int32_t  robot_id;
+	string   frame_id;
+	
+	// 机器人位姿 
+	double   x_robot;
+	double   y_robot;
+	double   th_robot;
+}

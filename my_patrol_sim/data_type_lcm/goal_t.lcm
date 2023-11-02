@@ -1,0 +1,9 @@
+package exlcm;
+
+struct goal_t
+{
+	int32_t  robot_id;
+	int32_t  vertex_id;
+	double   decision_time;
+	double   estimate_time;
+}

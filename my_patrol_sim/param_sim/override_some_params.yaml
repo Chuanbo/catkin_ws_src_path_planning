@@ -1,0 +1,4 @@
+TrajectoryPlannerROS:
+
+# Modify Configuration Parameters in file "base_local_planner_params.yaml" 
+  max_vel_x: 0.9      # default 0.3 

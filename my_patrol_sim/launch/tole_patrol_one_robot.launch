@@ -1,0 +1,7 @@
+<launch>
+
+  <node name="robot_0" pkg="my_patrol_sim" type="my_patrol_sim" args="0 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_0" />
+  </node>
+
+</launch>

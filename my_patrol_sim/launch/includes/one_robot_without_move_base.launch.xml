@@ -1,0 +1,15 @@
+<launch>
+
+  <arg name="robot_name" default="robot_0" />
+
+  <group ns="$(arg robot_name)">
+    <param name="tf_prefix" value="$(arg robot_name)" />
+
+    <node pkg="fake_localization" type="fake_localization" name="fake_localization" respawn="false" output="screen">
+      <param name="odom_frame_id" value="$(arg robot_name)/odom" />
+      <param name="base_frame_id" value="$(arg robot_name)/base_footprint" />
+    </node>
+
+  </group>
+
+</launch>

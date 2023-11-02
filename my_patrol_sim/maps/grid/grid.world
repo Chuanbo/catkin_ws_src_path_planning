@@ -1,0 +1,26 @@
+name                    "Navigation-2D multi-robot"
+interval_sim            100
+quit_time                 0
+resolution                0.02
+show_clock                0
+show_clock_interval     100
+threads                 2
+
+include "../turtlebot.inc"
+
+window( 
+  size [ 500 500 1]         # Tamanho da janela em pixeis
+  rotate [ 0.000 0.000 ]    # Mapa não rodado
+  center [12.0 12.0 ]       # Centro da Janela no ponto central do ambiente (em metros)
+  scale 15                  # zoom da janela
+  show_data 0
+)
+
+# load an environment bitmap
+floorplan (
+  size [25.8 25.8  1]   #metros (a imagem tem 344x344pixeis => 0.075 resolução no .yaml)
+  pose [12.9 12.9 0 0]
+  bitmap "grid.pgm"
+)
+
+include "robots.inc"

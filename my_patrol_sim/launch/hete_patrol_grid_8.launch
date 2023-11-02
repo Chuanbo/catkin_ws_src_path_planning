@@ -1,0 +1,41 @@
+<launch>
+  
+  <node name="robot_0" pkg="my_patrol_sim" type="my_patrol_sim" args="0 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_0" />
+    <param name="vel_robot" value="0.5" />
+  </node>
+  
+
+  <node name="robot_1" pkg="my_patrol_sim" type="my_patrol_sim" args="1 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_1" />
+    <param name="vel_robot" value="0.5" />
+  </node>
+  
+  
+  <node name="robot_2" pkg="my_patrol_sim" type="my_patrol_sim" args="2 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_2" />
+    <param name="vel_robot" value="0.5" />
+  </node>
+  
+  
+  <node name="robot_3" pkg="my_patrol_sim" type="my_patrol_sim" args="3 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_3" />
+    <param name="vel_robot" value="0.5" />
+  </node>
+  
+  
+  <node name="robot_4" pkg="my_patrol_sim" type="my_patrol_sim" args="4 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_4" />
+  </node>
+  <node name="robot_5" pkg="my_patrol_sim" type="my_patrol_sim" args="5 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_5" />
+  </node>
+  <node name="robot_6" pkg="my_patrol_sim" type="my_patrol_sim" args="6 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_6" />
+  </node>
+  <node name="robot_7" pkg="my_patrol_sim" type="my_patrol_sim" args="7 $(find my_patrol_sim)/maps/grid/grid.graph" output="screen" >
+    <param name="tf_prefix" value="robot_7" />
+  </node>
+
+
+</launch>

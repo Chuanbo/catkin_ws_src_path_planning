@@ -1,0 +1,13 @@
+<launch>
+
+  <arg name="map_name" default="grid" />
+  
+  <node pkg="map_server" type="map_server" name="map_server" args="$(find my_patrol_sim)/maps/$(arg map_name)/$(arg map_name).yaml" respawn="false" >
+    <param name="frame_id" value="map" />
+  </node>
+  
+  <node pkg="stage_ros_add_pose_and_crash" type="stageros" name="stageros" args="$(find my_patrol_sim)/maps/$(arg map_name)/$(arg map_name).world" respawn="false">
+    <param name="base_watchdog_timeout" value="0.2"/>
+  </node>
+
+</launch>

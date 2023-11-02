@@ -1,0 +1,8 @@
+package exlcm;
+
+struct idleness_t
+{
+	int32_t  robot_id;
+	int32_t  vertex_id;
+	double   visit_time;
+}

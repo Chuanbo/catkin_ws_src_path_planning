@@ -1,0 +1,7 @@
+package exlcm;
+
+struct command_t
+{
+	boolean  is_start;
+	boolean  is_stop;
+}
