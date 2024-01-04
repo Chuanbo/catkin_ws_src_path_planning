@@ -5,6 +5,7 @@ import tf
 import time
 import copy
 import math
+import sys
 import numpy as np
 import A_star_path_finding_improved as A_star
 import Dynamic_Window_Approaches as DWA
@@ -13,6 +14,7 @@ from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import String
 
 """代码参考
         https://blog.csdn.net/a819096127/article/details/89552223
@@ -22,12 +24,21 @@ from sensor_msgs.msg import LaserScan
 """
 
 class robot_Astar_DWA():
-    def __init__(self):
-        rospy.init_node("robot_Astar_DWA")
+    def __init__(self, argv):
+        if len(argv) == 1:
+            print("No parameter")
+            self.robot_id = ""
+            self.robot_prefix = ""
+        else:
+            print("robot_id = ", argv[1])
+            self.robot_id = argv[1]
+            self.robot_prefix = "/robot_" + argv[1]
+        print(self.robot_prefix)
+        rospy.init_node("robot_" + self.robot_id + "_Astar_DWA")
         self.start_time = 0
         self.end_time = 0
-        self.path_pub = rospy.Publisher("/path_my_A_star", Path, queue_size=1)
-        self.path_pub_changed = rospy.Publisher("/path_my_A_star_changed", Path, queue_size=1)
+        # self.path_pub = rospy.Publisher("/path_my_A_star", Path, queue_size=1)
+        # self.path_pub_changed = rospy.Publisher("/path_my_A_star_changed", Path, queue_size=1)
         self.line_database = []  # 用于路径规划的分割合并
         # 关于地图的一些变量
         self.origin_x = 0
@@ -35,12 +46,13 @@ class robot_Astar_DWA():
         self.resolution = 0
         self.width = 0
         self.height = 0
-        self.map_test_pub = rospy.Publisher("/map_test", OccupancyGrid, queue_size=1)
+        # self.map_test_pub = rospy.Publisher("/map_test", OccupancyGrid, queue_size=1)
         self.map_sub_once = rospy.Subscriber("/map", OccupancyGrid, self.map_callback)
         # new add
-        self.laser_sub = rospy.Subscriber("/robot_1/base_scan", LaserScan, self.laserscan_callback, queue_size=1)
-        self.odom_sub = rospy.Subscriber("/robot_1/odom", Odometry, self.odom_callback, queue_size=1)
-        self.cmd_pub = rospy.Publisher("/robot_1/cmd_vel", Twist, queue_size=1)
+        self.reach_goal_pub = rospy.Publisher("/robot_reach_goal_str", String, queue_size=10)
+        self.laser_sub = rospy.Subscriber(self.robot_prefix + "/base_scan", LaserScan, self.laserscan_callback, queue_size=1)
+        self.odom_sub = rospy.Subscriber(self.robot_prefix + "/odom", Odometry, self.odom_callback, queue_size=1)
+        self.cmd_pub = rospy.Publisher(self.robot_prefix + "/cmd_vel", Twist, queue_size=1)
         self.scan_msg = None
         self.rp = np.zeros(3)
         self.crv = 0.0
@@ -63,7 +75,7 @@ class robot_Astar_DWA():
         self.if_start_find_path = False
         self.goal_pose = PoseStamped()
         self.init_pose = PoseWithCovarianceStamped()
-        self.goal_pose_sub = rospy.Subscriber("/move_base_simple/goal", PoseStamped, self.goal_pose_callback)
+        self.goal_pose_sub = rospy.Subscriber(self.robot_prefix + "/move_base_simple/goal", PoseStamped, self.goal_pose_callback, queue_size=1)
         self.last_time = rospy.get_rostime()
         self.start_find_path()
         # new add dwa
@@ -97,6 +109,10 @@ class robot_Astar_DWA():
                         print("approach sub goal !")
                     elif dist_to_sub_goal < dwa_config.xy_goal_tolerance:
                         self.sub_goal = None
+                        # 机器人已到达目标点，发布消息告知上层控制端，以获取新的导航目标点
+                        reach_goal_msg = String()
+                        reach_goal_msg.data = self.robot_id
+                        self.reach_goal_pub.publish(reach_goal_msg)
                         print("reach final goal !")
                     else:
                         state = np.array([self.rp[0], self.rp[1], self.rp[2], self.crv, self.crw])
@@ -175,8 +191,7 @@ class robot_Astar_DWA():
             self.path_map, open_list_index = Dij_find_path.start_find(self.start_map_point, self.goal_map_point)
             # 把遍历的open表节点更新到地图中
             self.path_map_be = self.path_map
-            self.update_map(open_list_index)
-            self.map_test_pub.publish(self.map_msg)
+            # self.update_map(open_list_index)
             # 分割合并算法，提取关键拐点
             self.split(self.path_map_be, 0.3)
             self.line_database = self.merge(self.line_database, 2.4)
@@ -196,7 +211,7 @@ class robot_Astar_DWA():
             # print(self.path_map_be)
             # print(self.path_map)
             # 发布规划的路径
-            self.publish_astar_path()
+            # self.publish_astar_path()
         else:
             rospy.sleep(1)
             print('\033[33m[W] : Please set goal pose\033[0m')
@@ -283,7 +298,7 @@ class robot_Astar_DWA():
 
     def getrobotpose(self):
         try:
-            (trans,rot) = self.listener.lookupTransform('/map', '/robot_1/base_link', rospy.Time(0))
+            (trans,rot) = self.listener.lookupTransform("/map", self.robot_prefix + "/base_link", rospy.Time(0))
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             return False
         self.rp[0] = trans[0]
@@ -460,4 +475,4 @@ class robot_Astar_DWA():
 
 
 if __name__ == '__main__':
-    robot_Astar_DWA()
+    robot_Astar_DWA(sys.argv)

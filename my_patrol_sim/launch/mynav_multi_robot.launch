@@ -1,0 +1,10 @@
+<launch>
+
+  <node name="robot_0" pkg="my_patrol_sim" type="robot_Astar_DWA.py" args="0" output="screen" />
+  <node name="robot_1" pkg="my_patrol_sim" type="robot_Astar_DWA.py" args="1" output="screen" />
+  <node name="robot_2" pkg="my_patrol_sim" type="robot_Astar_DWA.py" args="2" output="screen" />
+  <node name="robot_3" pkg="my_patrol_sim" type="robot_Astar_DWA.py" args="3" output="screen" />
+
+  <node name="transfer_goal" pkg="my_patrol_sim" type="transfer_goal.py" output="screen" />
+
+</launch>
