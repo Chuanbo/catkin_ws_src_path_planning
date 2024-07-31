@@ -1,0 +1,18 @@
+<launch>
+
+  <node pkg="dynamic_obstacle_detector" type="dynamic_obstacle_detector_node" name="dynamic_obstacle_detector" output="screen" >
+        <param name="input_scan_topic" value="robot_0/base_scan" />
+        <!-- <param name="odom_frame" value="robot_0/odom" /> -->
+        <param name="odom_frame" value="map" />
+        <param name="cluster_max_distance_points" value="0.6" />
+        <!-- <param name="cluster_min_points" value="3" /> -->
+        <!-- cluster_min_points 设置大一些的值，过滤掉距离机器人较远的障碍物 -->
+        <param name="cluster_min_points" value="6" />
+        <param name="cluster_max_points" value="40" />
+        <param name="min_vel_tracked" value="0.1" />
+        <param name="max_vel_tracked" value="1.3" />
+        <param name="max_tracked_distance" value="0.55" />
+        <param name="max_tracked_sec" value="0.8" />
+  </node>
+
+</launch>

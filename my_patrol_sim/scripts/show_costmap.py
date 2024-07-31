@@ -60,7 +60,7 @@ class CostMap(object):
 
 def draw_map(map_size, map_data):
     """
-        This function returns the RGB image perceived by the camera.
+        This function returns the RGB image.
         :rtype: np.ndarray or None
     """
     row, col = map_size[1], map_size[0]  # 一维转二维，注意对应关系

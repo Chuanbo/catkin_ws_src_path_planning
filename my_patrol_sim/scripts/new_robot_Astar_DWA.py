@@ -8,13 +8,14 @@ import math
 import sys
 import numpy as np
 import A_star_path_finding_improved as A_star
-import Dynamic_Window_Approaches as DWA
+import new_Dynamic_Window_Approaches as DWA
 from nav_msgs.msg import Path, OccupancyGrid
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
+from dynamic_obstacle_detector.msg import DynamicObstacles
 
 """代码参考
         https://blog.csdn.net/a819096127/article/details/89552223
@@ -78,6 +79,13 @@ class robot_Astar_DWA():
         self.goal_pose_sub = rospy.Subscriber(self.robot_prefix + "/move_base_simple/goal", PoseStamped, self.goal_pose_callback, queue_size=1)
         self.last_time = rospy.get_rostime()
         self.start_find_path()
+        # new add local map
+        self.local_width = 0
+        self.local_height = 0
+        self.occupancy_array = None
+        # new add dynamic obstacle or velocity obstacle
+        self.dynamicobstacles_msg = None
+        self.dynobst_sub = rospy.Subscriber("/dynamic_obstacles", DynamicObstacles, self.dynamic_obstacles_callback)
         # new add dwa
         self.ob = np.array([[-100,-100],[-200,-200]])  # 先固定好格式，后续会继续具体赋值
         self.if_start_dwa_navigation = False
@@ -85,7 +93,7 @@ class robot_Astar_DWA():
         self.robot_radius = dwa_config.robot_radius  # Astar与DWA中的机器人半径robot_radius保持一致
         self.dwa = DWA.DWA(dwa_config)
         self.sub_goal = None
-        rate = rospy.Rate(10)  # 10Hz
+        rate = rospy.Rate(5)  # change from 10Hz to 5Hz
         while not rospy.is_shutdown():
             if not self.if_start_dwa_navigation:
                 pass
@@ -97,6 +105,7 @@ class robot_Astar_DWA():
                     else:
                         temp_point = self.path_map_be.pop()
                         print(temp_point)
+                        # path from Astar is [y,x] not [x,y]
                         goal_x, goal_y = self.mapToWorld(temp_point[1], temp_point[0])
                         self.sub_goal = np.array([goal_x, goal_y])
                         self.getrobotpose()  # update robot position
@@ -107,7 +116,7 @@ class robot_Astar_DWA():
                         # 提前抛弃当前子目标点，切换到下一个子目标点，以避免接近子目标点时机器人的减速
                         self.sub_goal = None
                         print("approach sub goal !")
-                    elif dist_to_sub_goal < dwa_config.xy_goal_tolerance:
+                    elif (dist_to_sub_goal < dwa_config.xy_goal_tolerance) and (len(self.path_map_be) == 0):
                         self.sub_goal = None
                         # 机器人已到达目标点，发布消息告知上层控制端，以获取新的导航目标点
                         reach_goal_msg = String()
@@ -118,13 +127,55 @@ class robot_Astar_DWA():
                     else:
                         state = np.array([self.rp[0], self.rp[1], self.rp[2], self.crv, self.crw])
                         self.update_ob_from_scan()  # update self.ob from self.scan_msg
-                        u, predicted_trajectory = self.dwa.dwa_control(state, self.sub_goal, self.ob)
+                        dynobst_msg = copy.deepcopy(self.dynamicobstacles_msg)
+                        # 与静态地图 map 对比，过滤掉 dynobst_msg 中误判的动态障碍物
+                        self.update_local_map()
+                        dynobst_msg_new = self.update_dynobst(dynobst_msg)
+                        # print(len(dynobst_msg.obstacles))
+                        # print("ss")
+                        # print(len(dynobst_msg_new.obstacles))
+                        u, predicted_trajectory = self.dwa.dwa_control(state, self.sub_goal, self.ob, dynobst_msg_new)
                         # 如果只有一行，则程序未能正确求解
                         # print(np.size(predicted_trajectory, 0))
                         self.publish_cmd_twist(u[0], u[1])
                         # print("v = ", u[0], "    w = ", u[1])
             rate.sleep()
         rospy.spin()
+
+
+    def update_dynobst(self, dynobst_msg):
+        dynobst_num = len(dynobst_msg.obstacles)
+        for index in reversed(range(dynobst_num)):  # 逆序遍历
+            ob_x = dynobst_msg.obstacles[index].position.x
+            ob_y = dynobst_msg.obstacles[index].position.y
+            ob_vx = dynobst_msg.obstacles[index].velocity.x
+            ob_vy = dynobst_msg.obstacles[index].velocity.y
+            dynobst_point = self.WorldTomap(ob_x, ob_y)
+            # print(dynobst_point)
+            dx = self.occupancy_array[:, 0] - dynobst_point[0]
+            dy = self.occupancy_array[:, 1] - dynobst_point[1]
+            r = np.hypot(dx, dy)
+            if np.min(r) < 4:  # 如果识别出的动态障碍物距离静态障碍物过于接近，则舍弃之
+                del dynobst_msg.obstacles[index]
+        return dynobst_msg
+
+
+    def update_local_map(self):
+        self.local_width = int(4.0 / self.resolution)  # pixel
+        self.local_height = int(4.0 / self.resolution)
+        robot_point = self.WorldTomap(self.rp[0], self.rp[1])
+        i_min = int(max(0, robot_point[1]-self.local_height))
+        i_max = int(min(self.height, robot_point[1]+self.local_height))
+        j_min = int(max(0, robot_point[0]-self.local_width))
+        j_max = int(min(self.width, robot_point[0]+self.local_width))
+        occupancy_x_list = []  # 静态障碍物占据的栅格点坐标构成的列表
+        occupancy_y_list = []
+        for i in range(i_min, i_max):
+            for j in range(j_min, j_max):
+                if self.map[i][j] > 0:
+                    occupancy_x_list.append(j)
+                    occupancy_y_list.append(i)
+        self.occupancy_array = np.vstack((occupancy_x_list, occupancy_y_list)).T
 
 
     def update_ob_from_scan(self):
@@ -189,7 +240,8 @@ class robot_Astar_DWA():
             # 初始化路径规划类的对象（局部变量，用后即删）
             Dij_find_path = A_star.find_path(self.map, robot_size=8, inflation_size=2)
             # 获取规划的路径
-            self.path_map, open_list_index = Dij_find_path.start_find(self.start_map_point, self.goal_map_point)
+            # Astar use [y,x] not [x,y]
+            self.path_map, open_list_index = Dij_find_path.start_find(np.flip(self.start_map_point), np.flip(self.goal_map_point))
             # 把遍历的open表节点更新到地图中
             self.path_map_be = self.path_map
             # self.update_map(open_list_index)
@@ -204,6 +256,9 @@ class robot_Astar_DWA():
             end_length = len(self.line_database[len(self.line_database) - 1]) - 1
             self.path_map_be.append(np.array(self.line_database[len(self.line_database) - 1][end_length]))
             self.line_database = []  # 用于路径规划的分割合并  本次Astar路径规划已完成，清空line_database，以备下次Astar路径规划
+            # 下面这个while循环如果没有被注释，则抛弃所有中间点，只保留最终目标点，即不使用Astar算法，仅使用DWA算法进行导航
+            while (len(self.path_map_be) > 1):
+                self.path_map_be.pop()
 
             print("-----------------------------------------")
             print(len(self.path_map_be))
@@ -233,6 +288,17 @@ class robot_Astar_DWA():
 
     def laserscan_callback(self, scan):
         self.scan_msg = scan
+
+    def dynamic_obstacles_callback(self, msg):
+        self.dynamicobstacles_msg = msg
+        # for print
+        # for index in range(len(msg.obstacles)):
+        #     ob_x = msg.obstacles[index].position.x
+        #     ob_y = msg.obstacles[index].position.y
+        #     ob_vx = msg.obstacles[index].velocity.x
+        #     ob_vy = msg.obstacles[index].velocity.y
+        #     print(ob_x, ob_y, ob_vx, ob_vy)
+        # print("dynamic obstacles Number =  ", len(msg.obstacles))
 
 
     # 回调函数系列
@@ -272,7 +338,8 @@ class robot_Astar_DWA():
         mx = (int)((wx - self.origin_x) / self.resolution)
         my = (int)((wy - self.origin_y) / self.resolution)
         if mx < self.width and my < self.height:
-            return [my, mx]
+            # return [my, mx]
+            return [mx, my]
         return [-1, -1]
 
 
@@ -290,11 +357,15 @@ class robot_Astar_DWA():
         self.width = msg.info.width
         self.height = msg.info.height
         print("-----width------",self.width)
-        # # 把map里的消息存下来
+        # 把map里的消息存下来
         self.map_msg = msg
         raw = np.array(msg.data, dtype=np.int8)
         self.map = raw.reshape((self.height, self.width))
         self.map_sub_once.unregister()  # unsubscribe to a topic
+        # test local map
+        # self.update_local_map()
+        # print(self.occupancy_array)
+        # print(self.occupancy_array.shape)
 
 
     def getrobotpose(self):
