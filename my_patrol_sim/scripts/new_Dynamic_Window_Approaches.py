@@ -236,9 +236,13 @@ class DWA:
 
                 # 处理动态障碍物信息 dynobst_msg ，修改 dist_eval 的值
                 # 方法1 速度障碍物 velocity obstacle ---------- begin ----------
-                """
-                robot_vx = state[3] * math.cos(state[2]) - state[4] * math.sin(state[2]) * 0.12  # 角速度近似，待改进
-                robot_vy = state[3] * math.sin(state[2]) + state[4] * math.cos(state[2]) * 0.12
+                # """
+                # 角速度近似，待改进，已弃用
+                # robot_vx = state[3] * math.cos(state[2]) - state[4] * math.sin(state[2]) * 0.12
+                # robot_vy = state[3] * math.sin(state[2]) + state[4] * math.cos(state[2]) * 0.12
+                # 对运动学模型积分得到x,y的位移，分别除以时间记得到速度vx,vy
+                robot_vx = (math.sin(state[2]+state[4]*self.predict_time) - math.sin(state[2])) * state[3] / (state[4]*self.predict_time)
+                robot_vy = (math.cos(state[2]) - math.cos(state[2]+state[4]*self.predict_time)) * state[3] / (state[4]*self.predict_time)
                 robot_for_vo = check_Velocity_Obstacle.RobotforVO(self.radius, state[0], state[1], robot_vx, robot_vy)
                 dynobst_num = len(dynobst_msg.obstacles)
                 for index in range(dynobst_num):
@@ -252,11 +256,11 @@ class DWA:
                     if constraint_val < 0.0:
                         dist_eval -= self.judge_distance / sum_dist  # 如果速度与移动障碍物相冲突，则抵扣损失函数 dist_eval
                         print("dist_eval =  ", dist_eval)
-                """
+                # """
                 # 方法1 ---------- end ----------
 
                 # 方法2 生成障碍物运动轨迹，评估障碍物轨迹与机器人轨迹是否有冲突 ---------- begin ----------
-                # """
+                """
                 dynobst_num = len(dynobst_msg.obstacles)
                 for index in range(dynobst_num):
                     ob_x = dynobst_msg.obstacles[index].position.x
@@ -270,7 +274,7 @@ class DWA:
                     # 7*radius not 3*radius for dynamic obstacle
                     dynobst_dist_eval = np.min(r) if np.array(r < self.radius * 7).any() else self.judge_distance
                     dist_eval += dynobst_dist_eval / ( sum_dist * dynobst_num )
-                # """
+                """
                 # 方法2 ---------- end ----------
 
                 G = self.alpha * heading_eval + self.beta * dist_eval + self.gamma * vel_eval  # 第3步--轨迹评价
