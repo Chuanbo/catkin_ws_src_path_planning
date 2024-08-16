@@ -25,7 +25,7 @@ class Config:
         # 线加速度和角加速度最大值
         self.a_vmax = 0.3  # [m/ss]
         self.a_wmax = 30.0 * math.pi / 180.0  # [rad/ss]
-        # 采样分辨率
+        # 采样分辨率 
         self.v_sample = 0.01  # [m/s]
         self.w_sample = 0.2 * math.pi / 180.0  # [rad/s]
         # 离散时间
@@ -33,14 +33,14 @@ class Config:
         # 轨迹推算时间长度
         self.predict_time = 3.0  # [s]
         # 轨迹评价函数系数
-        self.alpha = 4.0        # heading_scale
-        self.beta = 16.0        # dist_scale
-        self.gamma = 2.0        # velocity_scale  降低速度的权重
+        self.alpha = 1.0        # heading_scale
+        self.beta = 8.0         # dist_scale
+        self.gamma = 1.0        # velocity_scale  降低速度的权重
 
         self.xy_goal_tolerance = 0.1  # [m]
         self.robot_radius = 0.3  # [m] for collision check
         
-        self.judge_distance = 5  # 若与障碍物的最小距离大于阈值（例如设置为 robot_radius * 5 ）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 5倍机器人半径
+        self.judge_distance = 10  # 若与障碍物的最小距离大于阈值（例如设置为robot_radius*3）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 3倍机器人半径
 
         # 障碍物位置 [x(m) y(m), ....], 实际使用时，从外部输入确定障碍物位置ob (使用local_costmap)
         self.ob = np.array([[-1, -1],
@@ -212,25 +212,34 @@ class DWA:
         control_opt = [0., 0.]  # 最优控制
         dynamic_window_vel = self.cal_dynamic_window_vel(state[3], state[4], state, obstacle)  # 第1步--计算速度空间
         
-        # 在速度空间中按照预先设定的分辨率采样
         sum_heading,sum_dist,sum_vel = 0, 0, 0  # 统计全部采样轨迹的各个评价之和，便于评价的归一化
-        list_heading = []
-        list_dist = []
-        list_vel = []
-        list_v = []
-        list_w = []
         for v in np.arange(dynamic_window_vel[0],dynamic_window_vel[1],self.v_sample):
             for w in np.arange(dynamic_window_vel[2], dynamic_window_vel[3], self.w_sample):   
-                trajectory = self.trajectory_predict(state, v, w)  # 第2步--轨迹推算
+                trajectory = self.trajectory_predict(state, v, w)  
 
                 heading_eval = self.__heading(trajectory, goal)
                 dist_eval = self.__dist(trajectory, obstacle, dynobst_msg)
                 vel_eval = self.__velocity(trajectory)
-                
+                sum_vel+=vel_eval
+                sum_dist+=dist_eval
+                sum_heading +=heading_eval
+
+        # 在速度空间中按照预先设定的分辨率采样
+        # sum_heading,sum_dist,sum_vel = 1,1,1 # 不进行归一化
+        for v in np.arange(dynamic_window_vel[0],dynamic_window_vel[1],self.v_sample):
+            for w in np.arange(dynamic_window_vel[2], dynamic_window_vel[3], self.w_sample):
+                trajectory = self.trajectory_predict(state, v, w)  # 第2步--轨迹推算
+
+                heading_eval = self.__heading(trajectory, goal) / sum_heading
+                dist_eval = self.__dist(trajectory, obstacle, dynobst_msg) / sum_dist
+                vel_eval = self.__velocity(trajectory) / sum_vel
+
                 # 处理动态障碍物信息 dynobst_msg ，修改 dist_eval 的值
-                # 方法1 速度障碍物 velocity obstacle
-                # 方法1 ---------- begin ----------
+                # 方法1 速度障碍物 velocity obstacle ---------- begin ----------
                 """
+                # 角速度近似，待改进，已弃用
+                # robot_vx = state[3] * math.cos(state[2]) - state[4] * math.sin(state[2]) * 0.12
+                # robot_vy = state[3] * math.sin(state[2]) + state[4] * math.cos(state[2]) * 0.12
                 # 对运动学模型积分得到x,y的位移，分别除以时间记得到速度vx,vy
                 robot_vx = (math.sin(state[2]+state[4]*self.predict_time) - math.sin(state[2])) * state[3] / (state[4]*self.predict_time)
                 robot_vy = (math.cos(state[2]) - math.cos(state[2]+state[4]*self.predict_time)) * state[3] / (state[4]*self.predict_time)
@@ -245,13 +254,30 @@ class DWA:
                     constraint_val = check_Velocity_Obstacle.collision_cone_val(robot_for_vo, obstacle_for_vo)
                     # if constraint_val >= 0, no collision , else there will be a collision in the future
                     if constraint_val < 0.0:
-                        dist_eval = dist_eval / 2  # 如果速度与移动障碍物相冲突，则将评价函数 dist_eval 设置为很小的值
+                        dist_eval -= self.judge_distance / sum_dist  # 如果速度与移动障碍物相冲突，则抵扣损失函数 dist_eval
                         # print("dist_eval =  ", dist_eval)
                 """
                 # 方法1 ---------- end ----------
 
-                # 方法4 依据障碍物速度信息，预估误差，采样多个可能的速度，生成多条可能的障碍物轨迹，评估障碍物轨迹与机器人轨迹是否有冲突
-                # 方法4 ---------- begin ----------
+                # 方法2 生成障碍物运动轨迹，评估障碍物轨迹与机器人轨迹是否有冲突 ---------- begin ----------
+                """
+                dynobst_num = len(dynobst_msg.obstacles)
+                for index in range(dynobst_num):
+                    ob_x = dynobst_msg.obstacles[index].position.x
+                    ob_y = dynobst_msg.obstacles[index].position.y
+                    ob_vx = dynobst_msg.obstacles[index].velocity.x
+                    ob_vy = dynobst_msg.obstacles[index].velocity.y
+                    dynobst_trajectory = self.dynobst_trajectory_predict(ob_x, ob_y, ob_vx, ob_vy)
+                    dx = trajectory[:, 0] - dynobst_trajectory[:, 0]
+                    dy = trajectory[:, 1] - dynobst_trajectory[:, 1]
+                    r = np.hypot(dx, dy)
+                    # 7*radius not 3*radius for dynamic obstacle
+                    dynobst_dist_eval = np.min(r) if np.array(r < self.radius * 7).any() else self.judge_distance
+                    dist_eval += dynobst_dist_eval / ( sum_dist * dynobst_num )
+                """
+                # 方法2 ---------- end ----------
+
+                # 方法4 依据障碍物速度信息，预估误差，采样多个可能的速度，生成多条可能的障碍物轨迹，评估障碍物轨迹与机器人轨迹是否有冲突 ---------- begin ----------
                 # """
                 dynobst_num = len(dynobst_msg.obstacles)
                 for index in range(dynobst_num):
@@ -259,45 +285,31 @@ class DWA:
                     ob_y = dynobst_msg.obstacles[index].position.y
                     ob_vx = dynobst_msg.obstacles[index].velocity.x
                     ob_vy = dynobst_msg.obstacles[index].velocity.y
-                    # ob_vdelta = np.linalg.norm([ob_vx, ob_vy]) * 0.2
-                    # ob_vnum = math.pow(2 * ob_vdelta / 0.05, 2)
-                    for vx in np.arange(ob_vx * 0.8, ob_vx * 1.2, 0.02):
-                        for vy in np.arange(ob_vy * 0.8, ob_vy * 1.2, 0.02):
-                            # 障碍物速度 ob_vx, ob_vy 在一定范围内采样
+                    ob_vdelta = np.linalg.norm([ob_vx, ob_vy]) * 0.2
+                    ob_vnum = math.pow(2 * ob_vdelta / 0.05, 2)
+                    for vx in np.arange(ob_vx - ob_vdelta, ob_vx + ob_vdelta, 0.05):
+                        for vy in np.arange(ob_vy - ob_vdelta, ob_vy + ob_vdelta, 0.05):
+                            # cy
                             dynobst_trajectory = self.dynobst_trajectory_predict(ob_x, ob_y, vx, vy)
                             dx = trajectory[:, 0] - dynobst_trajectory[:, 0]
                             dy = trajectory[:, 1] - dynobst_trajectory[:, 1]
                             r = np.hypot(dx, dy)
-                            # 5 * radius for dynamic obstacle
-                            dynobst_dist_eval = np.min(r) if np.array(r < self.radius * 5).any() else self.judge_distance*0.8
-                            dist_eval = min(dist_eval, dynobst_dist_eval)
+                            # 3*radius for dynamic obstacle
+                            if np.array(r > self.radius * 3).all():
+                                break
+                            dynobst_dist_eval = np.min(r)
+                            dist_eval += dynobst_dist_eval / ( sum_dist * dynobst_num * ob_vnum )
                 # """
                 # 方法4 ---------- end ----------
 
-                sum_vel+=vel_eval
-                sum_dist+=dist_eval
-                sum_heading +=heading_eval
-                list_vel.append(vel_eval)
-                list_dist.append(dist_eval)
-                list_heading.append(heading_eval)
-                list_v.append(v)
-                list_w.append(w)
+                G = self.alpha * heading_eval + self.beta * dist_eval + self.gamma * vel_eval  # 第3步--轨迹评价
+                print("    heading_eval ", heading_eval, "    dist_eval ", dist_eval, "    vel_eval ", vel_eval)
 
-        for i in range(0, len(list_dist)):
-            heading_eval = list_heading[i] / sum_heading
-            dist_eval = list_dist[i] / sum_dist
-            vel_eval = list_vel[i] / sum_vel
-            G = self.alpha * heading_eval + self.beta * dist_eval + self.gamma * vel_eval  # 第3步--轨迹评价
-            if G_max < G:
-                G_max = G
-                v = list_v[i]
-                w = list_w[i]
-                trajectory = self.trajectory_predict(state, v, w)
-                trajectory_opt = trajectory
-                control_opt = [v,w]
-                # print("    heading_eval ", heading_eval, "    dist_eval ", dist_eval, "    vel_eval ", vel_eval)
+                if G_max < G:
+                    G_max = G
+                    trajectory_opt = trajectory
+                    control_opt = [v,w]
 
-        # print("--------------------")
         return control_opt, trajectory_opt
 
 
@@ -328,10 +340,35 @@ class DWA:
         """
         ox = obstacle[:, 0]
         oy = obstacle[:, 1]
+        # 方法3 将移动障碍物的预测轨迹全部加入到静态障碍物中，评估障碍物与机器人轨迹是否有冲突 ---------- begin ----------
+        """
+        # print(ox.shape)
+        # print(oy.shape)
+        obstacle_new = obstacle
+        dynobst_num = len(dynobst_msg.obstacles)
+        for index in range(dynobst_num):
+            ob_x = dynobst_msg.obstacles[index].position.x
+            ob_y = dynobst_msg.obstacles[index].position.y
+            ob_vx = dynobst_msg.obstacles[index].velocity.x
+            ob_vy = dynobst_msg.obstacles[index].velocity.y
+            dynobst_trajectory = self.dynobst_trajectory_predict(ob_x, ob_y, ob_vx, ob_vy)
+            # print(dynobst_trajectory.shape)
+            obstacle_new = np.vstack((obstacle_new, dynobst_trajectory[:, 0:2]))
+        ox = obstacle_new[:, 0]
+        oy = obstacle_new[:, 1]
+        # print(ox.shape)
+        # print(oy.shape)
+        if os.path.exists("/home/ychb/data_oxy.npz"):
+            pass
+        else:
+            np.savez("/home/ychb/data_oxy.npz", ox=ox, oy=oy)
+            print(os.getcwd())
+        """
+        # 方法3 ---------- end ----------
         dx = trajectory[:, 0] - ox[:, None]  # 1*n - num_ob*1  Numpy中不同维度数组之间的计算(Broadcasting广播机制)
         dy = trajectory[:, 1] - oy[:, None]
         r = np.hypot(dx, dy)
-        # 若与障碍物的最小距离大于阈值（例如设置为 robot_radius * 5 ）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 5倍机器人半径
+        # 若与障碍物的最小距离大于阈值（例如设置为robot_radius*3）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 3倍机器人半径
         return np.min(r) if np.array(r < self.radius * 5).any() else self.judge_distance
 
     def __heading(self,trajectory, goal):
@@ -357,8 +394,7 @@ class DWA:
         Returns:
             _type_: 速度评价
         """
-        # 试过同时考虑速度和角速度，但机器人可能会异常转圈，效果不好
-        return trajectory[-1,3]  # + trajectory[-1,4] / 6
+        return trajectory[-1,3]
 
 
 def KinematicModel(state,control,dt):
