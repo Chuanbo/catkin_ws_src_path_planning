@@ -35,9 +35,11 @@ class Config:
         # 轨迹评价函数系数
         self.alpha = 4.0        # heading_scale
         self.beta = 16.0        # dist_scale
-        self.gamma = 2.0        # velocity_scale  降低速度的权重
+        self.gamma = 2.0        # velocity_scale
+        self.mu = 8.0           # new angle2dyn
+        self.xi = 12.0          # new dist2dyn
 
-        self.xy_goal_tolerance = 0.1  # [m]
+        self.xy_goal_tolerance = 0.25  # 0.1  # [m]
         self.robot_radius = 0.3  # [m] for collision check
         
         self.judge_distance = 5  # 若与障碍物的最小距离大于阈值（例如设置为 robot_radius * 5 ）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 5倍机器人半径
@@ -91,6 +93,8 @@ class DWA:
         self.alpha = config.alpha
         self.beta = config.beta
         self.gamma = config.gamma
+        self.mu = config.mu
+        self.xi = config.xi
         self.xy_goal_tolerance = config.xy_goal_tolerance
         self.radius = config.robot_radius
         self.judge_distance = config.judge_distance
@@ -214,11 +218,15 @@ class DWA:
         
         # 在速度空间中按照预先设定的分辨率采样
         sum_heading,sum_dist,sum_vel = 0, 0, 0  # 统计全部采样轨迹的各个评价之和，便于评价的归一化
+        sum_angle2dyn = 0  # new angle2dyn VelToObs (angle between ob_v and r_robot2dynobst)
+        sum_dist2dyn = 0   # new dist2dyn (distance to dynamic obstacle)
         list_heading = []
         list_dist = []
         list_vel = []
         list_v = []
         list_w = []
+        list_angle2dyn = []  # new angle2dyn VelToObs
+        list_dist2dyn = []   # new dist2dyn
         for v in np.arange(dynamic_window_vel[0],dynamic_window_vel[1],self.v_sample):
             for w in np.arange(dynamic_window_vel[2], dynamic_window_vel[3], self.w_sample):   
                 trajectory = self.trajectory_predict(state, v, w)  # 第2步--轨迹推算
@@ -226,29 +234,33 @@ class DWA:
                 heading_eval = self.__heading(trajectory, goal)
                 dist_eval = self.__dist(trajectory, obstacle, dynobst_msg)
                 vel_eval = self.__velocity(trajectory)
+                angle2dyn_eval = 10.0  # new angle2dyn VelToObs
+                dist2dyn_eval = 10.0   # new dist2dyn
                 
                 # 处理动态障碍物信息 dynobst_msg ，修改 dist_eval 的值
-                # 方法1 速度障碍物 velocity obstacle
-                # 方法1 ---------- begin ----------
-                """
+                # 方法5 new VelToObs subfunction from D2WA paper/method
+                # 方法5 new ---------- begin ----------
+                # """
                 # 对运动学模型积分得到x,y的位移，分别除以时间记得到速度vx,vy
-                robot_vx = (math.sin(state[2]+state[4]*self.predict_time) - math.sin(state[2])) * state[3] / (state[4]*self.predict_time)
-                robot_vy = (math.cos(state[2]) - math.cos(state[2]+state[4]*self.predict_time)) * state[3] / (state[4]*self.predict_time)
-                robot_for_vo = check_Velocity_Obstacle.RobotforVO(self.radius, state[0], state[1], robot_vx, robot_vy)
                 dynobst_num = len(dynobst_msg.obstacles)
                 for index in range(dynobst_num):
                     ob_x = dynobst_msg.obstacles[index].position.x
                     ob_y = dynobst_msg.obstacles[index].position.y
                     ob_vx = dynobst_msg.obstacles[index].velocity.x
                     ob_vy = dynobst_msg.obstacles[index].velocity.y
-                    obstacle_for_vo = check_Velocity_Obstacle.ObstacleforVO(self.radius, ob_x, ob_y, ob_vx, ob_vy)
-                    constraint_val = check_Velocity_Obstacle.collision_cone_val(robot_for_vo, obstacle_for_vo)
-                    # if constraint_val >= 0, no collision , else there will be a collision in the future
-                    if constraint_val < 0.0:
-                        dist_eval = dist_eval / 2  # 如果速度与移动障碍物相冲突，则将评价函数 dist_eval 设置为很小的值
-                        # print("dist_eval =  ", dist_eval)
-                """
-                # 方法1 ---------- end ----------
+                    # 依据机器人与障碍物的(相对)速度和距离的关系，判断是否考虑这个移动障碍物对机器人运动规划的影响
+                    angle_vobs2d = math.atan2(state[1]-ob_y, state[0]-ob_x) - math.atan2(ob_vy, ob_vx)
+                    angle_vrob2d = math.atan2(state[1]-ob_y, state[0]-ob_x) - state[2]
+                    d_threshold = 3.85 * ( state[3]*math.cos(angle_vrob2d) + np.linalg.norm([ob_vx, ob_vy])*math.cos(angle_vobs2d) )
+                    if np.linalg.norm([state[0]-ob_x, state[1]-ob_y]) > d_threshold:
+                        continue
+                    # 计算机器人运动规划预估的到达位置与移动障碍物的相对角度 与 障碍物速度 之间的夹角，作为新的(new)评估项(第4个)
+                    rf_x = trajectory[-1, 0]
+                    rf_y = trajectory[-1, 1]
+                    angle2dyn_temp = abs( math.atan2(rf_y-ob_y, rf_x-ob_x) - math.atan2(ob_vy, ob_vx) )
+                    angle2dyn_eval = min(angle2dyn_eval, angle2dyn_temp)
+                # """
+                # 方法5 new ---------- end ----------
 
                 # 方法4 依据障碍物速度信息，预估误差，采样多个可能的速度，生成多条可能的障碍物轨迹，评估障碍物轨迹与机器人轨迹是否有冲突
                 # 方法4 ---------- begin ----------
@@ -261,8 +273,8 @@ class DWA:
                     ob_vy = dynobst_msg.obstacles[index].velocity.y
                     # ob_vdelta = np.linalg.norm([ob_vx, ob_vy]) * 0.2
                     # ob_vnum = math.pow(2 * ob_vdelta / 0.05, 2)
-                    for vx in np.arange(ob_vx * 0.8, ob_vx * 1.2, 0.02):
-                        for vy in np.arange(ob_vy * 0.8, ob_vy * 1.2, 0.02):
+                    for vx in np.arange(ob_vx * 0.85, ob_vx * 1.15, 0.02):
+                        for vy in np.arange(ob_vy * 0.85, ob_vy * 1.15, 0.02):
                             # 障碍物速度 ob_vx, ob_vy 在一定范围内采样
                             dynobst_trajectory = self.dynobst_trajectory_predict(ob_x, ob_y, vx, vy)
                             dx = trajectory[:, 0] - dynobst_trajectory[:, 0]
@@ -270,24 +282,31 @@ class DWA:
                             r = np.hypot(dx, dy)
                             # 5 * radius for dynamic obstacle
                             dynobst_dist_eval = np.min(r) if np.array(r < self.radius * 5).any() else self.judge_distance*0.8
-                            dist_eval = min(dist_eval, dynobst_dist_eval)
+                            dist2dyn_eval = min(dist2dyn_eval, dynobst_dist_eval)
                 # """
                 # 方法4 ---------- end ----------
 
                 sum_vel+=vel_eval
                 sum_dist+=dist_eval
                 sum_heading +=heading_eval
+                sum_angle2dyn += angle2dyn_eval  # new angle2dyn VelToObs
+                sum_dist2dyn += dist2dyn_eval    # new dist2dyn
                 list_vel.append(vel_eval)
                 list_dist.append(dist_eval)
                 list_heading.append(heading_eval)
                 list_v.append(v)
                 list_w.append(w)
+                list_angle2dyn.append(angle2dyn_eval)  # new angle2dyn VelToObs
+                list_dist2dyn.append(dist2dyn_eval)    # new dist2dyn
 
         for i in range(0, len(list_dist)):
             heading_eval = list_heading[i] / sum_heading
             dist_eval = list_dist[i] / sum_dist
             vel_eval = list_vel[i] / sum_vel
-            G = self.alpha * heading_eval + self.beta * dist_eval + self.gamma * vel_eval  # 第3步--轨迹评价
+            angle2dyn_eval = list_angle2dyn[i] / sum_angle2dyn  # new angle2dyn VelToObs
+            dist2dyn_eval = list_dist2dyn[i] / sum_dist2dyn     # new dist2dyn
+            G = self.alpha * heading_eval + self.beta * dist_eval + self.gamma * vel_eval \
+                              + self.mu * angle2dyn_eval + self.xi * dist2dyn_eval      # 第3步--轨迹评价
             if G_max < G:
                 G_max = G
                 v = list_v[i]
@@ -331,8 +350,9 @@ class DWA:
         dx = trajectory[:, 0] - ox[:, None]  # 1*n - num_ob*1  Numpy中不同维度数组之间的计算(Broadcasting广播机制)
         dy = trajectory[:, 1] - oy[:, None]
         r = np.hypot(dx, dy)
-        # 若与障碍物的最小距离大于阈值（例如设置为 robot_radius * 5 ）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 5倍机器人半径
-        return np.min(r) if np.array(r < self.radius * 5).any() else self.judge_distance
+        # 若与障碍物的最小距离大于阈值（例如设置为 robot_radius * 3 ）,则设为一个较大的常值judge_distance 障碍物的最大影响距离 3倍机器人半径
+        # 3 * radius for static obstacle
+        return np.min(r) if np.array(r < self.radius * 3).any() else self.judge_distance
 
     def __heading(self,trajectory, goal):
         """方位角评价函数

@@ -137,13 +137,20 @@ class robot_Astar_DWA():
                         u, predicted_trajectory = self.dwa.dwa_control(state, self.sub_goal, self.ob, dynobst_msg_new)
                         # 如果只有一行，则程序未能正确求解
                         # print(np.size(predicted_trajectory, 0))
-                        self.publish_cmd_twist(u[0], u[1])
+                        # 如果机器人编号大于100，则认为是单个机器人(gazebo)，角速度w=u[1]符号是负； 如果机器人编号小于100，则认为是多个机器人(stage)，角速度w=u[1]符号是正
+                        if int(self.robot_id) > 100:    # 如果机器人编号大于100，则认为是单个机器人 (gazebo)
+                            # 仅仅在gazebo的TD3_world/map环境下，角速度w=u[1]的符号是反过来的，在其他gazebo环境下也是正的
+                            self.publish_cmd_twist(u[0], 1.0*u[1])
+                        else:    # 如果机器人编号小于100，则认为是多个机器人 (stage)
+                            self.publish_cmd_twist(u[0], 1.0*u[1])
                         # print("v = ", u[0], "    w = ", u[1])
             rate.sleep()
         rospy.spin()
 
 
     def update_dynobst(self, dynobst_msg):
+        return dynobst_msg    # pass return
+
         dynobst_num = len(dynobst_msg.obstacles)
         for index in reversed(range(dynobst_num)):  # 逆序遍历
             ob_x = dynobst_msg.obstacles[index].position.x
@@ -186,8 +193,9 @@ class robot_Astar_DWA():
             cached_cos = np.cos( np.arange(scan.angle_min, scan.angle_max, scan.angle_increment) + self.rp[2] )
             cached_sin = np.sin( np.arange(scan.angle_min, scan.angle_max, scan.angle_increment) + self.rp[2] )
             # Convert scan from polar to cartesian coordinate system
-            pc_x = scan.ranges * cached_cos + self.rp[0]
-            pc_y = scan.ranges * cached_sin + self.rp[1]
+            # 如果 cached_cos/cached_sin 和 scan 的长度不一致，则以 cached_cos/cached_sin 为对齐
+            pc_x = scan.ranges[0:len(cached_cos)] * cached_cos + self.rp[0]
+            pc_y = scan.ranges[0:len(cached_cos)] * cached_sin + self.rp[1]
             # 如果激光测距点的间距/地图分辨率与机器人半径相比要小很多，则可以适当地降采样以降低计算复杂度
             self.ob = np.stack([pc_x, pc_y]).T
             # print("self.ob.shape = ", self.ob.shape)
@@ -256,9 +264,10 @@ class robot_Astar_DWA():
             end_length = len(self.line_database[len(self.line_database) - 1]) - 1
             self.path_map_be.append(np.array(self.line_database[len(self.line_database) - 1][end_length]))
             self.line_database = []  # 用于路径规划的分割合并  本次Astar路径规划已完成，清空line_database，以备下次Astar路径规划
+
             # 下面这个while循环如果没有被注释，则抛弃所有中间点，只保留最终目标点，即不使用Astar算法，仅使用DWA算法进行导航
-            while (len(self.path_map_be) > 1):
-                self.path_map_be.pop()
+            # while (len(self.path_map_be) > 1):
+                # self.path_map_be.pop()
 
             print("-----------------------------------------")
             print(len(self.path_map_be))
@@ -369,10 +378,15 @@ class robot_Astar_DWA():
 
 
     def getrobotpose(self):
+        # 如果机器人编号大于100，则认为是单个机器人(gazebo)，没有tf前缀； 如果机器人编号小于100，则认为是多个机器人(stage)，有tf前缀
         try:
-            (trans,rot) = self.listener.lookupTransform("/map", self.robot_prefix + "/base_link", rospy.Time(0))
+            if int(self.robot_id) > 100:  # 如果机器人编号大于100，则认为是单个机器人，tf 变换时则没有 self.robot_prefix 前缀
+                (trans,rot) = self.listener.lookupTransform("/map", "/base_link", rospy.Time(0))
+            else:
+                (trans,rot) = self.listener.lookupTransform("/map", self.robot_prefix + "/base_link", rospy.Time(0))
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             return False
+        
         self.rp[0] = trans[0]
         self.rp[1] = trans[1]
         r,p,y = tf.transformations.euler_from_quaternion(rot)

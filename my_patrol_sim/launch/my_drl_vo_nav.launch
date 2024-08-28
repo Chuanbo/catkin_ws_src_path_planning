@@ -1,0 +1,69 @@
+<launch>
+  <arg name="scene_file" default="$(find pedsim_simulator)/scenarios/eng_hall.xml"/>
+  <arg name="world_name" default="$(find pedsim_gazebo_plugin)/worlds/eng_hall.world"/>
+  <arg name="gui" default="true" doc="Bring up the Gazebo graphical interface"/>
+  <arg name="pose_initial_x" default="1.0"/> 
+  <arg name="pose_initial_y" default="1.0"/>
+  <arg name="map_file" default="$(find robot_gazebo)/maps/gazebo_eng_lobby/gazebo_eng_lobby.yaml"/>
+  <arg name="initial_pose_x" default="1.0"/>
+  <arg name="initial_pose_y" default="0.0"/>
+  <arg name="initial_pose_a" default="0.13"/>
+  <!-- Output -->
+  <arg name="output" default="log"/>
+  <arg name="enable_opencv" default="true"/>
+  <arg name="enable_console_output" default="true"/>
+  <arg name="rviz" default="true"/> 
+
+  <!-- Pedsim Gazebo -->
+  <include file="$(find pedsim_simulator)/launch/robot.launch">
+    <arg name="scene_file" value="$(arg scene_file)"/>
+    <arg name="world_name" value="$(arg world_name)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="pose_initial_x" value="$(arg pose_initial_x)"/> 
+    <arg name="pose_initial_y" value="$(arg pose_initial_y)"/>
+  </include>
+
+  <!-- Map server -->
+  <node name="map_server" pkg="map_server" type="map_server" args="$(arg map_file)" />
+
+  <!-- AMCL -->
+  <arg name="custom_amcl_launch_file" default="$(find robot_gazebo)/launch/includes/amcl/amcl.launch.xml"/> 
+  <include file="$(arg custom_amcl_launch_file)">
+    <arg name="initial_pose_x" value="$(arg initial_pose_x)"/>
+    <arg name="initial_pose_y" value="$(arg initial_pose_y)"/>
+    <arg name="initial_pose_a" value="$(arg initial_pose_a)"/>
+  </include>
+
+
+  <!-- Rviz -->
+  <include file="$(find robot_gazebo)/launch/view_navigation.launch" if="$(arg rviz)"/>
+
+
+  <!--  ************** Navigation ROBOT 120 *************  -->
+  <arg name="robot_name" default="robot_120" />
+  <!-- <node pkg="tf" type="static_transform_publisher" name="link_name" args="0 0 0 0 0 0 map odom 20" /> -->
+
+  <node pkg="dynamic_obstacle_detector" type="dynamic_obstacle_detector_node" name="dynamic_obstacle_detector" output="screen" >
+        <param name="input_scan_topic" value="/scan" />
+        <!-- <param name="odom_frame" value="robot_0/odom" /> -->
+        <param name="odom_frame" value="map" />
+        <param name="cluster_max_distance_points" value="0.6" />
+        <!-- <param name="cluster_min_points" value="3" /> -->
+        <!-- cluster_min_points 设置大一些的值，过滤掉距离机器人较远的障碍物 -->
+        <param name="cluster_min_points" value="6" />
+        <param name="cluster_max_points" value="40" />
+        <param name="min_vel_tracked" value="0.1" />
+        <param name="max_vel_tracked" value="1.3" />
+        <param name="max_tracked_distance" value="0.55" />
+        <param name="max_tracked_sec" value="0.8" />
+  </node>
+
+  <group ns="$(arg robot_name)">
+    <remap from="/robot_120/base_scan" to="/scan" />
+    <remap from="/robot_120/odom" to="/odom" />
+    <remap from="/robot_120/cmd_vel" to="/cmd_vel_mux/input/teleop" />
+    <remap from="/robot_120/move_base_simple/goal" to="/move_base_simple/goal" />
+    <node name="robot_nav_0" pkg="my_patrol_sim" type="new_robot_Astar_DWA.py" args="120" output="screen" />
+  </group>
+
+</launch>

@@ -1,4 +1,4 @@
-<launch> 
+<launch>
     <include file="$(find gazebo_ros)/launch/empty_world.launch">
         <arg name="world_name" value="$(find multi_robot_scenario)/launch/TD3.world"/>
         <arg name="paused" value="false"/>
@@ -6,5 +6,5 @@
         <arg name="gui" value="true"/>
         <arg name="headless" value="false"/>
         <arg name="debug" value="false"/>
-      </include>
+    </include>
 </launch>
